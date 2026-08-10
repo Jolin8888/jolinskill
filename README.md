@@ -10,6 +10,7 @@ Jolin 个人 Claude Code skill 集合。
 | `article-structure-intent/` | article-structure-intent | 文章结构优化与深层意图还原 |
 | `shudong/` | 树洞 | 情绪倾诉与心理陪伴 |
 | `video-use/` | video-use | 通过对话编辑视频 |
+| `skills/知乎抓取C端用户感受/` | 知乎抓取C端用户感受 | 每日抓取知乎 C 端用户感受并推送到对话 |
 
 ## 使用方式
 
