@@ -18,7 +18,7 @@ description: 每日抓取知乎 C 端用户感受，整理为问题与高赞回�
   - `zhihu search --json -l 10 -a 5 被芯`
   - `zhihu search --json -l 10 -a 5 四件套`
 - 回退：CLI 未认证、JSON 读取失败、结果不足或页面数据不可用时，使用 Playwright MCP。
-- 输出：当前对话 + 本地 Markdown 报告；当天已有完整报告时不重复抓取。
+- 输出：当前对话 + OneDrive Markdown 报告；当天已有完整报告时不重复抓取。
 
 ## 对话命名规则
 
@@ -37,11 +37,15 @@ description: 每日抓取知乎 C 端用户感受，整理为问题与高赞回�
 
 ## 产物
 
-报告保存到：
+所有每日抓取报告统一保存到 OneDrive 目录：
 
-`/Users/carpediem/Documents/ChatGPT/知乎热点/知乎家纺抓取_YYYY-MM-DD.md`
+`/Users/carpediem/Library/CloudStorage/OneDrive-Errington/每日抓取文件/知乎抓取C端用户感受`
 
-报告必须包含按关键词索引、逐题记录、回答明细、运行汇总和结构化 JSON。
+文件名使用 America/New_York 当天日期的 `MMDD家纺c端客户抓取.md`，例如：
+
+`0810家纺c端客户抓取.md`
+
+报告必须包含按关键词索引、逐题记录、回答明细、运行汇总和数据质量说明。新报告不得再写入旧目录 `/Users/carpediem/Documents/ChatGPT/知乎热点`。
 
 ## 参考来源
 
