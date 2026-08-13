@@ -12,13 +12,15 @@ description: 每日抓取知乎 C 端用户感受，整理为问题与高赞回�
 ## 运行方式
 
 - 频率：每天 23:06，America/New_York。
-- 入口：本地 Cron 自动化；手动检查先执行 `zhihu status`。
+- 运行位置：007 服务器 `154.201.90.246`，用户 `jolin`。
+- 入口：用户级 systemd timer `zhihu-customer-voice.timer`；本机旧 automation-2 保持暂停，避免重复运行。
 - CLI：优先使用 zhihu-cli 0.2.4：
   - `zhihu search --json -l 10 -a 5 枕芯`
   - `zhihu search --json -l 10 -a 5 被芯`
   - `zhihu search --json -l 10 -a 5 四件套`
-- 回退：CLI 未认证、JSON 读取失败、结果不足或页面数据不可用时，使用 Playwright MCP。
-- 输出：当前对话 + OneDrive Markdown 报告；当天已有完整报告时不重复抓取。
+- 安全边界：只允许搜索和读取；禁止发布、点赞、关注或删除。Cookie 只保存在 007 的 `~/.zhihu-cli/cookies.json`，权限为 `600`，不得进入 GitHub、Notion、日志或报告。
+- 输出：`/home/jolin/reports/zhihu-customer-voice/MMDD家纺c端客户抓取.md`；当天已有完整报告时不重复抓取。
+- 失败行为：认证失效、验证码、网络错误或无有效内容时退出失败，不生成空报告。
 
 ## 对话命名规则
 
@@ -37,15 +39,21 @@ description: 每日抓取知乎 C 端用户感受，整理为问题与高赞回�
 
 ## 产物
 
-所有每日抓取报告统一保存到 OneDrive 目录：
+007 上的每日抓取报告统一保存到：
 
-`/Users/carpediem/Library/CloudStorage/OneDrive-Errington/每日抓取文件/知乎抓取C端用户感受`
+`/home/jolin/reports/zhihu-customer-voice`
 
 文件名使用 America/New_York 当天日期的 `MMDD家纺c端客户抓取.md`，例如：
 
 `0810家纺c端客户抓取.md`
 
-报告必须包含按关键词索引、逐题记录、回答明细、运行汇总和数据质量说明。新报告不得再写入旧目录 `/Users/carpediem/Documents/ChatGPT/知乎热点`。
+报告必须包含关键词索引、有效问题/回答/文章、作者、短摘录、浏览器可打开的原文链接、运行汇总和数据质量说明。服务器产物同步到 OneDrive/Notion 属于独立下游步骤；未验证成功时不得声称已同步。
+
+## 007 部署文件
+
+- `server/run.py`：带单实例锁、180 秒搜索超时、类型过滤、原子写入及当天幂等。
+- `server/zhihu-customer-voice.service`：只读 systemd oneshot，限制权限和可写目录。
+- `server/zhihu-customer-voice.timer`：每天 23:06 America/New_York 运行，支持关机后补跑。
 
 ## 参考来源
 

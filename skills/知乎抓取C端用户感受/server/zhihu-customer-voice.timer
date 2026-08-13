@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Zhihu customer voice report at 23:06 New York time
+
+[Timer]
+OnCalendar=*-*-* 23:06:00 America/New_York
+Persistent=true
+RandomizedDelaySec=2m
+Unit=zhihu-customer-voice.service
+
+[Install]
+WantedBy=timers.target
