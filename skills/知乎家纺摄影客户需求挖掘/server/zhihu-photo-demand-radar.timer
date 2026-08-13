@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Zhihu photography demand radar at 23:36 New York time
+
+[Timer]
+OnCalendar=*-*-* 23:36:00 America/New_York
+Persistent=true
+RandomizedDelaySec=2m
+Unit=zhihu-photo-demand-radar.service
+
+[Install]
+WantedBy=timers.target

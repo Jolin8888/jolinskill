@@ -1,0 +1,18 @@
+[Unit]
+Description=Read-only Zhihu home-textile photography demand radar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -n /home/jolin/.local/state/zhihu-photo-demand-radar/service.lock /home/jolin/.local/share/uv/tools/pyzhihu-cli/bin/python /home/jolin/.local/libexec/zhihu-photo-demand-radar/run.py
+TimeoutStartSec=20min
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/jolin/reports/zhihu-photo-demand-radar /home/jolin/.local/state/zhihu-photo-demand-radar
+
+[Install]
+WantedBy=default.target

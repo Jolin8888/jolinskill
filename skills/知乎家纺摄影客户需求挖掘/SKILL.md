@@ -21,8 +21,9 @@ description: 每日从知乎挖掘南通及家纺行业 B2B 客户在产品销�
 ## 运行方式
 
 - 每天 23:36（America/New_York）运行。
-- 优先使用 zhihu-cli 0.2.4，执行 `zhihu status` 后使用 JSON 搜索。
-- CLI 认证失败、结果不足、JSON 读取失败或数据不可用时，回退 Playwright MCP。
+- 运行位置：007 服务器 `154.201.90.246`，用户级 systemd timer `zhihu-photo-demand-radar.timer`。
+- 使用隔离版 zhihu-cli 0.2.4 和已授权的只读小号；本机旧 automation-3 保持暂停。
+- Cookie 只保存在 007 的 `~/.zhihu-cli/cookies.json`，不得进入 GitHub、Notion、日志或报告。
 - 每轮重点研究 5 个优先 Cluster，不为了数量凑题。
 - 当天已有完整报告、JSON 和历史账本时不重复抓取。
 - 抓取失败、登录过期、验证码或无法可靠评分时停止，不生成空报告。
@@ -88,9 +89,13 @@ description: 每日从知乎挖掘南通及家纺行业 B2B 客户在产品销�
 9. 需求 Cluster 更新
 10. 与 Markdown 一致的结构化 JSON
 
-## 本地输出
+## 007 输出与部署
 
-`/Users/carpediem/Documents/ChatGPT/知乎热点/知乎家纺摄影客户需求`
+- 输出：`/home/jolin/reports/zhihu-photo-demand-radar`
+- `server/run.py`：单实例锁、180 秒搜索超时、URL/标题历史去重、摄影相关性过滤、原子写入和当天幂等。
+- `server/zhihu-photo-demand-radar.service`：受限权限的用户级 oneshot。
+- `server/zhihu-photo-demand-radar.timer`：每天 23:36 America/New_York，支持关机后补跑。
+- 每次共同维护 Markdown、JSON、`HISTORY_LEDGER.md` 和 `INSIGHT_CLUSTER_HISTORY.md`。
 
 ## 参考来源
 
