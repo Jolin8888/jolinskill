@@ -5,14 +5,16 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+EnvironmentFile=/home/jolin/.config/zhihu-dingtalk.env
 ExecStart=/usr/bin/flock -n /home/jolin/.local/state/zhihu-customer-voice/service.lock /home/jolin/.local/share/uv/tools/pyzhihu-cli/bin/python /home/jolin/.local/libexec/zhihu-customer-voice/run.py
+ExecStartPost=/usr/bin/python3 /home/jolin/.local/libexec/zhihu-customer-voice/send_dingtalk.py
 TimeoutStartSec=15min
 Nice=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/jolin/reports/zhihu-customer-voice /home/jolin/.local/state/zhihu-customer-voice
+ReadWritePaths=/home/jolin/reports/zhihu-customer-voice /home/jolin/.local/state/zhihu-customer-voice /home/jolin/.dws
 
 [Install]
 WantedBy=default.target
