@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -15,7 +16,16 @@ ZONE = ZoneInfo("America/New_York")
 REPORTS = Path.home() / "reports/zhihu-customer-voice"
 STATE = Path.home() / ".local/state/zhihu-customer-voice/dingtalk"
 DWS = Path.home() / ".npm-global/bin/dws"
-REQUIRED_MARKERS = ("# ", "## 枕芯", "## 被芯", "## 四件套")
+REQUIRED_MARKERS = (
+    "# ",
+    "## 关键词索引",
+    "## 枕芯",
+    "## 被芯",
+    "## 四件套",
+    "| 回答 | 作者 | 赞同 | 评论 | 主题 | 短摘录 |",
+    "## 运行汇总",
+    "## 数据质量说明",
+)
 
 
 def parse_args():
@@ -69,6 +79,13 @@ def report_for(report_date):
     missing = [marker for marker in REQUIRED_MARKERS if marker not in text]
     if missing:
         raise RuntimeError(f"report failed structure check: {path}; missing {missing}")
+    for keyword in ("枕芯", "被芯", "四件套"):
+        start = text.find(f"## {keyword}")
+        end = text.find("\n## ", start + 1)
+        section = text[start : end if end >= 0 else None]
+        pattern = r"^### \d+\. \[.+\]\(https://www\.zhihu\.com/question/\d+\)$"
+        if not re.search(pattern, section, re.MULTILINE):
+            raise RuntimeError(f"report failed question-link check: {keyword}")
     return path
 
 
