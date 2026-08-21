@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Send a complete Zhihu report as chunked Markdown through DingTalk Webhook."""
+
 import argparse
 import datetime as dt
 import hashlib
@@ -14,8 +16,11 @@ from zoneinfo import ZoneInfo
 
 ZONE = ZoneInfo("America/New_York")
 REPORTS = Path.home() / "reports/zhihu-customer-voice"
-STATE = Path.home() / ".local/state/zhihu-customer-voice/dingtalk"
+STATE = Path.home() / ".local/state/zhihu-customer-voice/dingtalk-webhook"
 DWS = Path.home() / ".npm-global/bin/dws"
+DEFAULT_CHUNK_CHARS = 3500
+DEFAULT_SEND_INTERVAL_SECONDS = 4.0
+MAX_PARTS = 30
 REQUIRED_MARKERS = (
     "# ",
     "## 关键词索引",
@@ -30,10 +35,10 @@ REQUIRED_MARKERS = (
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Send one complete Zhihu customer-voice report to DingTalk."
+        description="Send one complete Zhihu report as DingTalk Markdown messages."
     )
     parser.add_argument("--date", help="America/New_York report date in YYYY-MM-DD")
-    parser.add_argument("--dry-run", action="store_true", help="Validate only; do not send")
+    parser.add_argument("--dry-run", action="store_true", help="Validate and plan only")
     return parser.parse_args()
 
 
@@ -41,6 +46,17 @@ def required_env(name):
     value = os.environ.get(name, "").strip()
     if not value:
         raise RuntimeError(f"{name} is missing")
+    return value
+
+
+def positive_number_env(name, default, cast):
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        value = cast(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} is invalid") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be positive")
     return value
 
 
@@ -68,7 +84,12 @@ def run_dws(arguments, profile, timeout=90):
     if result.returncode or payload.get("success") is not True:
         message = payload.get("errorMsg") or payload.get("message") or "unknown dws error"
         raise RuntimeError(f"dws failed (exit={result.returncode}): {message}")
-    return payload.get("result") or {}
+    webhook_result = payload.get("result") or {}
+    error_code = webhook_result.get("errcode", webhook_result.get("errCode", 0))
+    if str(error_code) not in {"0", "None", ""}:
+        message = webhook_result.get("errmsg") or webhook_result.get("errMsg") or "webhook error"
+        raise RuntimeError(f"DingTalk Webhook failed: {message}")
+    return webhook_result
 
 
 def report_for(report_date):
@@ -86,7 +107,77 @@ def report_for(report_date):
         pattern = r"^### \d+\. \[.+\]\(https://www\.zhihu\.com/question/\d+\)$"
         if not re.search(pattern, section, re.MULTILINE):
             raise RuntimeError(f"report failed question-link check: {keyword}")
-    return path
+    return path, text
+
+
+def split_long_block(block, max_chars):
+    pieces = []
+    current = []
+    current_length = 0
+    for line in block.splitlines():
+        line_length = len(line) + (1 if current else 0)
+        if current and current_length + line_length > max_chars:
+            pieces.append("\n".join(current))
+            current = []
+            current_length = 0
+        if len(line) > max_chars:
+            if current:
+                pieces.append("\n".join(current))
+                current = []
+                current_length = 0
+            pieces.extend(
+                line[index : index + max_chars]
+                for index in range(0, len(line), max_chars)
+            )
+            continue
+        current.append(line)
+        current_length += line_length
+    if current:
+        pieces.append("\n".join(current))
+    return pieces
+
+
+def split_markdown(text, max_chars):
+    if max_chars < 500:
+        raise RuntimeError("DINGTALK_WEBHOOK_CHUNK_CHARS must be at least 500")
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", text) if block.strip()]
+    parts = []
+    current = []
+    current_length = 0
+    for block in blocks:
+        candidates = [block] if len(block) <= max_chars else split_long_block(block, max_chars)
+        for candidate in candidates:
+            addition = len(candidate) + (2 if current else 0)
+            if current and current_length + addition > max_chars:
+                parts.append("\n\n".join(current))
+                current = []
+                current_length = 0
+            current.append(candidate)
+            current_length += len(candidate) + (2 if len(current) > 1 else 0)
+    if current:
+        parts.append("\n\n".join(current))
+    if not parts:
+        raise RuntimeError("report produced no Markdown parts")
+    if len(parts) > MAX_PARTS:
+        raise RuntimeError(f"report needs {len(parts)} parts; maximum is {MAX_PARTS}")
+    return parts
+
+
+def decorated_part(content, report_date, part_number, total_parts):
+    heading = (
+        f"### 家纺报告｜{report_date:%Y-%m-%d}"
+        f"｜第 {part_number}/{total_parts} 部分"
+    )
+    return f"{heading}\n\n{content}"
+
+
+def atomic_json(path, payload):
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
 
 
 def main():
@@ -96,102 +187,103 @@ def main():
         if args.date
         else dt.datetime.now(ZONE).date()
     )
-    path = report_for(report_date)
-    group_id = required_env("DINGTALK_GROUP_ID")
-    group_name = required_env("DINGTALK_GROUP_NAME")
+    path, report_text = report_for(report_date)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    STATE.mkdir(parents=True, exist_ok=True)
+    marker_base = f"{report_date.isoformat()}-{digest[:16]}"
+    complete_marker = STATE / f"{marker_base}.sent"
+    if complete_marker.exists():
+        print(f"already sent as DingTalk Markdown: {path.name}")
+        return 0
+
     profile = required_env("DINGTALK_PROFILE")
+    token = required_env("DINGTALK_WEBHOOK_TOKEN")
+    chunk_chars = positive_number_env(
+        "DINGTALK_WEBHOOK_CHUNK_CHARS", DEFAULT_CHUNK_CHARS, int
+    )
+    if chunk_chars < 600:
+        raise RuntimeError("DINGTALK_WEBHOOK_CHUNK_CHARS must be at least 600")
+    interval = positive_number_env(
+        "DINGTALK_WEBHOOK_INTERVAL_SECONDS",
+        DEFAULT_SEND_INTERVAL_SECONDS,
+        float,
+    )
     if not DWS.is_file():
         raise RuntimeError(f"dws executable not found: {DWS}")
 
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    STATE.mkdir(parents=True, exist_ok=True)
-    marker = STATE / f"{report_date.isoformat()}-{digest[:16]}.sent"
-    if marker.exists():
-        print(f"already sent to DingTalk: {path.name}")
-        return 0
-
-    message_uuid = f"zhihu-customer-voice-{report_date.isoformat()}-{digest[:16]}"
+    parts = split_markdown(report_text, chunk_chars - 100)
     if args.dry_run:
-        search_result = run_dws(
-            ["chat", "search", "--query", group_name, "--limit", "20", "--cursor", "0"],
-            profile,
-        )
-        exact_matches = [
-            group
-            for group in search_result.get("groups", [])
-            if group.get("title") == group_name
-            and group.get("openConversationId") == group_id
-        ]
-        if len(exact_matches) != 1:
-            raise RuntimeError("configured DingTalk group did not resolve to one exact match")
         print(
             json.dumps(
                 {
-                    "action": "send_dingtalk_file",
+                    "action": "send_dingtalk_webhook_markdown",
                     "file": str(path),
                     "size": path.stat().st_size,
-                    "group_configured": bool(group_id),
-                    "group_verified": True,
+                    "parts": len(parts),
+                    "part_chars": [
+                        len(decorated_part(part, report_date, index, len(parts)))
+                        for index, part in enumerate(parts, start=1)
+                    ],
                     "profile_configured": bool(profile),
-                    "uuid": message_uuid,
+                    "webhook_configured": bool(token),
+                    "resume_supported": True,
                 },
                 ensure_ascii=False,
             )
         )
         return 0
 
-    sent = run_dws(
-        [
-            "chat",
-            "message",
-            "send",
-            "--group",
-            group_id,
-            "--msg-type",
-            "file",
-            "--file-path",
-            str(path),
-            "--uuid",
-            message_uuid,
-        ],
-        profile,
-    )
-    task_id = str(sent.get("openTaskId") or "")
-    if not task_id:
-        raise RuntimeError("dws send returned no openTaskId")
-
-    status_result = {}
-    for attempt in range(10):
-        status_result = run_dws(
-            ["chat", "message", "query-send-status", "--open-task-id", task_id],
+    sent_parts = 0
+    for index, part in enumerate(parts, start=1):
+        part_marker = STATE / f"{marker_base}.part-{index:02d}-of-{len(parts):02d}.sent"
+        if part_marker.exists():
+            sent_parts += 1
+            continue
+        title = f"家纺报告 {report_date:%m%d}（{index}/{len(parts)}）"
+        text = decorated_part(part, report_date, index, len(parts))
+        run_dws(
+            [
+                "chat",
+                "message",
+                "send-by-webhook",
+                "--token",
+                token,
+                "--title",
+                title,
+                "--text",
+                text,
+            ],
             profile,
         )
-        status = str(status_result.get("sendStatus") or "").upper()
-        if status == "SUCCESS":
-            break
-        if status in {"FAILED", "FAIL", "ERROR"}:
-            raise RuntimeError(f"DingTalk send failed: {status}")
-        if attempt < 9:
-            time.sleep(2)
-    else:
-        raise RuntimeError("DingTalk send status did not become SUCCESS")
-
-    marker.write_text(
-        json.dumps(
+        atomic_json(
+            part_marker,
             {
                 "file": str(path),
                 "sha256": digest,
-                "openTaskId": task_id,
-                "openMessageId": status_result.get("openMessageId"),
-                "sendStatus": status_result.get("sendStatus"),
+                "part": index,
+                "parts": len(parts),
+                "status": "SUCCESS",
+                "sentAt": dt.datetime.now(ZONE).isoformat(),
             },
-            ensure_ascii=False,
         )
-        + "\n",
-        encoding="utf-8",
+        sent_parts += 1
+        if index < len(parts):
+            time.sleep(interval)
+
+    if sent_parts != len(parts):
+        raise RuntimeError(f"only {sent_parts}/{len(parts)} Markdown parts were sent")
+    atomic_json(
+        complete_marker,
+        {
+            "file": str(path),
+            "sha256": digest,
+            "parts": len(parts),
+            "mode": "dingtalk_webhook_markdown",
+            "sendStatus": "SUCCESS",
+            "completedAt": dt.datetime.now(ZONE).isoformat(),
+        },
     )
-    os.chmod(marker, 0o600)
-    print(f"sent to DingTalk: {path.name}; status=SUCCESS")
+    print(f"sent to DingTalk Webhook as Markdown: {path.name}; parts={len(parts)}")
     return 0
 
 
