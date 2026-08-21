@@ -30,13 +30,65 @@ ANSWER_LIMIT = 5
 DEFAULT_MAX_SEARCH_PAGES = 12
 DEFAULT_ANSWER_SEARCH_PAGES = 1
 REPORT_MARKERS = (
-    "## 关键词索引",
-    "## 枕芯",
-    "## 被芯",
-    "## 四件套",
-    "## 运行汇总",
-    "## 数据质量说明",
+    "# 国内家纺C端客户需求汇总",
+    "## 一、今日核心判断",
+    "## 二、三类产品需求观察",
+    "## 三、消费者共同关注点",
+    "## 四、建议优先动作",
+    "## 五、原始问题与回答明细",
+    "### 枕芯原始明细",
+    "### 被芯原始明细",
+    "### 四件套原始明细",
+    "## 六、采集概况与数据说明",
 )
+
+CONCERN_RULES = (
+    (
+        "适合性与使用场景",
+        ("适合", "怎么选", "如何选", "哪种", "选择", "推荐", "舒服", "舒适", "好睡"),
+        "消费者想知道什么人、什么季节和什么睡眠习惯适合这款产品。",
+    ),
+    (
+        "价格与性价比",
+        ("价格", "贵", "便宜", "性价比", "几十", "几百", "利润", "预算", "一两百"),
+        "消费者愿意为真实差异付费，但需要看懂价格具体贵在哪里。",
+    ),
+    (
+        "材质与填充",
+        ("材质", "填充", "纤维", "棉", "羽绒", "蚕丝", "乳胶", "天丝", "面料"),
+        "消费者面对材料名词容易混乱，需要优缺点和适用人群对照。",
+    ),
+    (
+        "睡眠健康与体感",
+        ("颈", "睡眠", "儿童", "孩子", "宝宝", "螨虫", "发霉", "透气", "闷", "清凉"),
+        "消费者关注支撑、透气、温度和贴身安全，而不只是外观。",
+    ),
+    (
+        "清洗、耐用与售后使用",
+        ("清洗", "换一次", "耐用", "缩水", "起球", "贴合", "乱跑"),
+        "消费者在意产品买回家以后是否好维护、容易变形或影响使用。",
+    ),
+    (
+        "规格参数与组合方式",
+        ("尺寸", "支数", "密度", "床笠", "床单", "四件套", "三件套", "单件"),
+        "消费者需要真实参数和更灵活的规格组合，避免买错尺寸或闲置组件。",
+    ),
+)
+
+CATEGORY_GUIDANCE = {
+    "枕芯": {
+        "judgment": "消费者更关心高度、软硬度和睡姿是否匹配，其次才是材料与品牌。价格更高不等于更适合。",
+        "needs": "重点说明仰睡、侧睡和混合睡姿对应的受压后高度，并公开软硬度、回弹、透气、可清洁性和适合人群；儿童款突出防潮与安全。",
+    },
+    "被芯": {
+        "judgment": "被芯没有绝对最好的材料，选择主要受地区温度、怕冷怕热、重量偏好、预算和清洁方式影响。",
+        "needs": "按南方湿冷、北方干冷、空调房和春秋过渡等场景划分产品，说明填充物含量、填充重量、适用温度、贴合度和洗护方式。",
+    },
+    "四件套": {
+        "judgment": "消费者最关心面料和工艺是否与价格匹配，并对虚报支数、模糊成分和品牌溢价保持警惕。",
+        "needs": "公开面料成分、支数、密度、织法、安全等级和洗后表现；提供床单款、床笠款、租房基础款、夏季凉感款及单件组合。",
+    },
+}
 
 
 def clean(value, limit=None):
@@ -60,6 +112,24 @@ def visible_number(value):
         return str(int(value))
     except (TypeError, ValueError):
         return "不可见"
+
+
+def numeric_value(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def chinese_date(value):
+    return f"{value.year}年{value.month:02d}月{value.day:02d}日"
+
+
+def chinese_datetime(value):
+    return (
+        f"{chinese_date(value)} "
+        f"{value.hour:02d}时{value.minute:02d}分{value.second:02d}秒"
+    )
 
 
 def author_name(author):
@@ -86,10 +156,10 @@ def validate_complete_report(path):
     if missing:
         return False, f"缺少结构标记：{'、'.join(missing)}"
     for keyword in KEYWORDS:
-        start = text.find(f"## {keyword}")
-        end = text.find("\n## ", start + 1)
+        start = text.find(f"### {keyword}原始明细")
+        end = text.find("\n### ", start + 1)
         section = text[start : end if end >= 0 else None]
-        pattern = r"^### \d+\. \[.+\]\(https://www\.zhihu\.com/question/\d+\)$"
+        pattern = r"^#### \d+\. \[.+\]\(https://www\.zhihu\.com/question/\d+\)$"
         if not re.search(pattern, section, re.M):
             return False, f"{keyword} 缺少可追溯问题"
     return True, "结构完整"
@@ -260,21 +330,79 @@ def collect_keyword(client, limiter, keyword, max_pages, answer_search_pages=1):
     }
 
 
-def render_keyword(result):
+def question_interactions(question):
+    votes = sum(numeric_value(answer["voteup_count"]) for answer in question["answers"])
+    comments = sum(numeric_value(answer["comment_count"]) for answer in question["answers"])
+    return votes, comments
+
+
+def question_score(question):
+    votes, comments = question_interactions(question)
+    return votes + comments * 2
+
+
+def top_questions(result, limit=3):
+    return sorted(result["questions"], key=question_score, reverse=True)[:limit]
+
+
+def concern_counts(results):
+    counts = {name: 0 for name, _, _ in CONCERN_RULES}
+    for result in results:
+        for question in result["questions"]:
+            source = " ".join(
+                [question["title"]]
+                + [answer["excerpt"] for answer in question["answers"]]
+            )
+            for name, terms, _ in CONCERN_RULES:
+                if any(term in source for term in terms):
+                    counts[name] += 1
+    return counts
+
+
+def render_category_observation(result):
     keyword = result["keyword"]
-    lines = [f"## {keyword}", ""]
+    guidance = CATEGORY_GUIDANCE[keyword]
+    answer_count = sum(len(question["answers"]) for question in result["questions"])
+    lines = [
+        f"### {keyword}",
+        "",
+        f"- 今日样本：{len(result['questions'])} 个问题、{answer_count} 条可见回答。",
+        f"- 核心判断：{guidance['judgment']}",
+        f"- 产品表达重点：{guidance['needs']}",
+        "- 当日高关注问题：",
+    ]
+    for question in top_questions(result):
+        votes, comments = question_interactions(question)
+        question_url = f"https://www.zhihu.com/question/{question['id']}"
+        lines.append(
+            f"  - [{link_text(question['title'])}]({question_url})"
+            f"：样本内可见赞同 {votes}，评论 {comments}。"
+        )
+    lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def render_keyword_details(result):
+    keyword = result["keyword"]
+    answer_count = sum(len(question["answers"]) for question in result["questions"])
+    lines = [
+        f"### {keyword}原始明细",
+        "",
+        f"共 {len(result['questions'])} 个问题、{answer_count} 条当时可见回答。",
+        "",
+    ]
     for index, question in enumerate(result["questions"], start=1):
         question_url = f"https://www.zhihu.com/question/{question['id']}"
-        topics = "、".join(question["topics"]) or "未显示"
+        votes, comments = question_interactions(question)
         lines.extend(
             [
-                f"### {index}. [{link_text(question['title'])}]({question_url})",
+                f"#### {index}. [{link_text(question['title'])}]({question_url})",
                 "",
-                f"- 主题：{table_text(topics)}",
-                f"- 可见回答总数：{question['answer_count']}；本次收录：{len(question['answers'])} 条",
+                f"- 本次收录：{len(question['answers'])} 条可见回答。",
+                f"- 样本互动：赞同 {votes}，评论 {comments}。",
                 "",
-                "| 回答 | 作者 | 赞同 | 评论 | 主题 | 短摘录 |",
-                "|---|---|---:|---:|---|---|",
+                "| 回答链接 | 作者 | 赞同数 | 评论数 | 可见短摘录 |",
+                "|---|---|---:|---:|---|",
             ]
         )
         if question["answers"]:
@@ -283,15 +411,10 @@ def render_keyword(result):
                 lines.append(
                     f"| [回答 {answer_index}]({answer_url}) | "
                     f"{table_text(answer['author'])} | {answer['voteup_count']} | "
-                    f"{answer['comment_count']} | {table_text(topics)} | "
-                    f"{table_text(answer['excerpt'])} |"
+                    f"{answer['comment_count']} | {table_text(answer['excerpt'])} |"
                 )
         else:
-            lines.append(
-                "| - | 暂无可见回答 | 不可见 | 不可见 | "
-                + table_text(topics)
-                + " | - |"
-            )
+            lines.append("| - | 暂无可见回答 | 不可见 | 不可见 | - |")
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -308,46 +431,82 @@ def render_report(report_date, collected_at, results, max_pages, answer_search_p
         if report_date != collected_at.date()
         else "本报告为当日定时采集。"
     )
+    counts = concern_counts(results)
+    ranked_concerns = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     lines = [
-        f"# {report_date:%m%d} 家纺 C 端用户感受",
+        "# 国内家纺C端客户需求汇总",
         "",
-        f"- 报告日期：{report_date.isoformat()} America/New_York",
-        f"- 实际采集：{collected_at:%Y-%m-%d %H:%M:%S} America/New_York",
-        "- 运行位置：007 服务器",
-        f"- 关键词：{'、'.join(KEYWORDS)}",
+        f"- 报告日期：{chinese_date(report_date)}",
+        f"- 实际采集：美国纽约时间 {chinese_datetime(collected_at)}",
+        f"- 调研范围：{'、'.join(KEYWORDS)}",
+        f"- 样本数量：{question_total} 个问题、{answer_total} 条当时可见回答",
         "",
-        "## 关键词索引",
+        "## 一、今日核心判断",
         "",
-        *[f"- [{result['keyword']}](#{result['keyword']})" for result in results],
+        "1. 消费者最缺的不是更多材料名称，而是一套简单、可信的选择方法。",
+        "2. 消费者愿意为真实差异付费，但需要看懂不同价格具体贵在哪里。",
+        "3. 枕芯、被芯和四件套都存在明显的适配问题；能否降低买错风险，比单纯强调高端更重要。",
+        "4. 产品页面应优先讲清适合谁、适合什么场景、关键参数、使用限制和洗护方式。",
+        "",
+        "## 二、三类产品需求观察",
         "",
     ]
     for result in results:
-        lines.extend([render_keyword(result), ""])
+        lines.extend([render_category_observation(result), ""])
     lines.extend(
         [
-            "## 运行汇总",
+            "## 三、消费者共同关注点",
             "",
-            f"- 共收录 {question_total} 个可追溯问题、{answer_total} 条可见回答。",
+            "| 关注主题 | 涉及问题数 | 对产品的启示 |",
+            "|---|---:|---|",
+        ]
+    )
+    descriptions = {name: description for name, _, description in CONCERN_RULES}
+    for name, count in ranked_concerns:
+        if count:
+            lines.append(f"| {name} | {count} | {descriptions[name]} |")
+    lines.extend(
+        [
+            "",
+            "## 四、建议优先动作",
+            "",
+            "1. 为每款产品增加“适合谁、不适合谁、适合什么季节”的场景说明。",
+            "2. 用面料、填充、工艺、耐用性和售后解释价格差异，减少空泛的高端概念。",
+            "3. 分别建立枕芯高度与睡姿、被芯温度与重量、四件套面料与季节的中文选择表。",
+            "4. 优先解决消费者买回家后的问题，包括塌陷、闷热、被芯不贴套、缩水起球和规格不合。",
+            "5. 内容选题优先回答“不同价格差在哪里”“什么人适合什么材质”“怎样避免买错”。",
+            "",
+            "## 五、原始问题与回答明细",
+            "",
+            "以下明细用于追溯结论来源。为保证可读性，重要判断已放在报告前部。",
+            "",
+        ]
+    )
+    for result in results:
+        lines.extend([render_keyword_details(result), ""])
+    lines.extend(
+        [
+            "## 六、采集概况与数据说明",
+            "",
+            f"- 共收录 {question_total} 个可追溯问题、{answer_total} 条当时可见回答。",
         ]
     )
     for result in results:
         lines.append(
             f"- {result['keyword']}：{len(result['questions'])} 个问题，"
             f"{sum(len(question['answers']) for question in result['questions'])} 条回答，"
-            f"搜索 {result['pages_used']} 页。"
+            f"检索 {result['pages_used']} 页。"
         )
     lines.extend(
         [
             "",
-            "## 数据质量说明",
-            "",
             f"- {backfill_note}",
-            "- 每次搜索请求仅取 10 条，按结果顺序去重收集前 10 个问题；每个问题最多收录 5 条当时可见回答。",
-            f"- 搜索最多翻阅 {max_pages} 页；若结果提前结束或问题不足，汇总按实际可验证数量记录。",
-            f"- 问题详情接口当前被知乎拒绝；因此每个问题仅通过可用的搜索接口再检索最多 {answer_search_pages} 页，并严格按问题 ID 聚合回答。",
-            "- “主题”为本次搜索关键词归类，不声称是知乎官方话题标签。",
-            "- 赞同、评论或主题字段未由知乎接口返回时标记为“不可见”或“未显示”，不推测、不补造。",
+            "- 每次检索请求仅取 10 条，按结果顺序去重收集前 10 个问题；每个问题最多收录 5 条当时可见回答。",
+            f"- 检索最多翻阅 {max_pages} 页；若结果提前结束或问题不足，按实际可验证数量记录。",
+            f"- 知乎问题详情接口当前不可用，因此不再显示容易误解的“回答总数为零”；每个问题通过可用搜索接口再检索最多 {answer_search_pages} 页，并严格按问题编号聚合回答。",
+            "- 赞同数、评论数未返回时标记为“不可见”，不推测、不补造。",
             "- 短摘录由当时可见回答清理而来，每条不超过 80 个字符；不复制回答全文。",
+            "- 部分回答可能带有品牌推广倾向，互动数不等于实际购买量；本报告用于发现需求与表达机会，不单独用于估算市场规模。",
             "- 遇到登录失效、403/安全验证、网络或数据解析异常时，本次运行立即失败且不写入部分报告。",
             "",
         ]

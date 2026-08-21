@@ -120,8 +120,9 @@ class DingTalkSenderTests(unittest.TestCase):
 
     def test_readback_requires_all_question_links(self):
         source = (
-            "## 关键词索引\n## 枕芯\n## 被芯\n## 四件套\n"
-            "## 运行汇总\n## 数据质量说明\n"
+            "## 一、今日核心判断\n## 二、三类产品需求观察\n"
+            "## 三、消费者共同关注点\n## 四、建议优先动作\n"
+            "## 五、原始问题与回答明细\n## 六、采集概况与数据说明\n"
             "https://www.zhihu.com/question/123\n"
             "https://www.zhihu.com/question/456"
         )

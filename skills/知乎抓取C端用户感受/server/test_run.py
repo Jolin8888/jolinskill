@@ -42,6 +42,9 @@ class FakeClient:
         return {"data": data, "paging": {"is_end": page >= 2}}
 
 class RunnerTests(unittest.TestCase):
+    def test_chinese_date_rendering_does_not_depend_on_system_locale(self):
+        self.assertEqual("2026年08月21日", RUN.chinese_date(dt.date(2026, 8, 21)))
+
     def test_collects_first_ten_unique_questions_and_up_to_five_answers(self):
         result = RUN.collect_keyword(FakeClient(), RUN.RateLimiter(0), "枕芯", 5)
         self.assertEqual(10, len(result["questions"]))
@@ -61,10 +64,14 @@ class RunnerTests(unittest.TestCase):
         )
         report = RUN.render_report(dt.date(2026, 8, 19), collected_at, results, 5)
         self.assertIn("本报告为补跑", report)
-        self.assertEqual(30, report.count("\n### "))
+        self.assertIn("# 国内家纺C端客户需求汇总", report)
+        self.assertEqual(30, report.count("\n#### "))
         self.assertIn(
-            "| 回答 | 作者 | 赞同 | 评论 | 主题 | 短摘录 |", report
+            "| 回答链接 | 作者 | 赞同数 | 评论数 | 可见短摘录 |", report
         )
+        self.assertNotIn("可见回答总数：0", report)
+        self.assertIn("## 一、今日核心判断", report)
+        self.assertIn("## 四、建议优先动作", report)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "0819家纺C端客户抓取.md"
             path.write_text(report, encoding="utf-8")

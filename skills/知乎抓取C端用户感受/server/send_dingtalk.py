@@ -22,22 +22,25 @@ STATE = Path.home() / ".local/state/zhihu-customer-voice/dingtalk-document-n8n"
 DWS = Path.home() / ".npm-global/bin/dws"
 ENTRY_LABEL = "点击查看完整市场情报"
 REQUIRED_MARKERS = (
-    "# ",
-    "## 关键词索引",
-    "## 枕芯",
-    "## 被芯",
-    "## 四件套",
-    "| 回答 | 作者 | 赞同 | 评论 | 主题 | 短摘录 |",
-    "## 运行汇总",
-    "## 数据质量说明",
+    "# 国内家纺C端客户需求汇总",
+    "## 一、今日核心判断",
+    "## 二、三类产品需求观察",
+    "## 三、消费者共同关注点",
+    "## 四、建议优先动作",
+    "## 五、原始问题与回答明细",
+    "### 枕芯原始明细",
+    "### 被芯原始明细",
+    "### 四件套原始明细",
+    "| 回答链接 | 作者 | 赞同数 | 评论数 | 可见短摘录 |",
+    "## 六、采集概况与数据说明",
 )
 READBACK_MARKERS = (
-    "关键词索引",
-    "枕芯",
-    "被芯",
-    "四件套",
-    "运行汇总",
-    "数据质量说明",
+    "今日核心判断",
+    "三类产品需求观察",
+    "消费者共同关注点",
+    "建议优先动作",
+    "原始问题与回答明细",
+    "采集概况与数据说明",
 )
 
 
@@ -122,10 +125,10 @@ def report_for(report_date):
     if missing:
         raise RuntimeError(f"report failed structure check: {path}; missing {missing}")
     for keyword in ("枕芯", "被芯", "四件套"):
-        start = text.find(f"## {keyword}")
-        end = text.find("\n## ", start + 1)
+        start = text.find(f"### {keyword}原始明细")
+        end = text.find("\n### ", start + 1)
         section = text[start : end if end >= 0 else None]
-        pattern = r"^### \d+\. \[.+\]\(https://www\.zhihu\.com/question/\d+\)$"
+        pattern = r"^#### \d+\. \[.+\]\(https://www\.zhihu\.com/question/\d+\)$"
         if not re.search(pattern, section, re.MULTILINE):
             raise RuntimeError(f"report failed question-link check: {keyword}")
     return path, text
@@ -484,7 +487,10 @@ def main():
 
     if not notification_marker.exists():
         idempotency_key = f"zhihu-market-intelligence:{report_date.isoformat()}:{digest[:16]}"
-        message_title = f"家纺报告｜C端市场情报 {report_date:%Y-%m-%d}"
+        message_title = (
+            "国内家纺C端客户需求汇总｜"
+            f"{report_date.year}年{report_date.month:02d}月{report_date.day:02d}日"
+        )
         delivery = deliver_through_n8n(
             n8n_url,
             {
