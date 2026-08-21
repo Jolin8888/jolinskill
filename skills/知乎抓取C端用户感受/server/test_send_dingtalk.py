@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import datetime as dt
 import importlib.util
-import os
+import json
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -14,32 +14,85 @@ SPEC.loader.exec_module(SEND)
 
 
 class DingTalkSenderTests(unittest.TestCase):
-    def test_split_markdown_preserves_content_and_limit(self):
-        report = "# 报告\n\n" + "\n\n".join(
-            f"## 问题 {index}\n" + ("用户感受" * 80) for index in range(12)
+    def test_run_dws_accepts_composite_json_without_top_level_success(self):
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps({"doc_results": {"success": True, "documents": []}}),
+            stderr="",
         )
-        parts = SEND.split_markdown(report, 900)
-        self.assertGreater(len(parts), 1)
-        self.assertLessEqual(len(parts), SEND.MAX_PARTS)
-        self.assertTrue(all(len(part) <= 900 for part in parts))
-        joined = "\n\n".join(parts)
-        for index in range(12):
-            self.assertIn(f"## 问题 {index}", joined)
+        with mock.patch("subprocess.run", return_value=completed):
+            result = SEND.run_dws(["drive", "search"], "profile")
+        self.assertIn("doc_results", result)
 
-    def test_decorated_part_contains_keyword_date_and_sequence(self):
-        text = SEND.decorated_part("正文", dt.date(2026, 8, 20), 2, 7)
-        self.assertIn("家纺报告", text)
-        self.assertIn("2026-08-20", text)
-        self.assertIn("第 2/7 部分", text)
+    def test_run_dws_rejects_structured_business_error(self):
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps({"error": {"message": "approval required"}}),
+            stderr="",
+        )
+        with mock.patch("subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "approval required"):
+                SEND.run_dws(["drive", "publish", "set"], "profile")
 
-    def test_rejects_too_small_chunk_limit(self):
-        with self.assertRaisesRegex(RuntimeError, "at least 500"):
-            SEND.split_markdown("# 报告", 499)
+    def test_extracts_nested_document_node(self):
+        created = {"data": {"nodeId": "abc-123", "url": "https://example.test"}}
+        self.assertEqual(SEND.document_node(created), "abc-123")
 
-    def test_positive_number_env_rejects_non_positive_value(self):
-        with mock.patch.dict(os.environ, {"CHUNK_TEST": "0"}):
-            with self.assertRaisesRegex(RuntimeError, "must be positive"):
-                SEND.positive_number_env("CHUNK_TEST", 3500, int)
+    def test_exact_document_deduplicates_drive_and_doc_results(self):
+        item = {"name": "日报", "nodeId": "abc"}
+        result = {"doc_results": {"documents": [item]}, "drive_results": {"items": [item]}}
+        node, found = SEND.exact_document(result, "日报")
+        self.assertEqual(node, "abc")
+        self.assertEqual(found["name"], "日报")
+
+    def test_exact_document_rejects_multiple_nodes(self):
+        result = {
+            "items": [
+                {"name": "日报", "nodeId": "abc"},
+                {"name": "日报", "nodeId": "def"},
+            ]
+        }
+        with self.assertRaisesRegex(RuntimeError, "multiple"):
+            SEND.exact_document(result, "日报")
+
+    def test_document_url_prefers_dingtalk_url(self):
+        result = {
+            "url": "https://example.test",
+            "data": {"shareUrl": "https://alidocs.dingtalk.com/i/nodes/abc"},
+        }
+        self.assertEqual(
+            SEND.document_url(result, "fallback"),
+            "https://alidocs.dingtalk.com/i/nodes/abc",
+        )
+
+    def test_document_url_has_safe_fallback(self):
+        self.assertEqual(
+            SEND.document_url({}, "abc"),
+            "https://alidocs.dingtalk.com/i/nodes/abc",
+        )
+
+    def test_permission_user_ids_requires_read_capable_role(self):
+        result = {
+            "members": [
+                {"id": "reader", "role": "READER"},
+                {"userId": "editor", "role": "EDITOR"},
+                {"userId": "unknown", "role": "NONE"},
+            ]
+        }
+        self.assertEqual(SEND.permission_user_ids(result), {"reader", "editor"})
+
+    def test_readback_requires_all_question_links(self):
+        source = (
+            "## 关键词索引\n## 枕芯\n## 被芯\n## 四件套\n"
+            "## 运行汇总\n## 数据质量说明\n"
+            "https://www.zhihu.com/question/123\n"
+            "https://www.zhihu.com/question/456"
+        )
+        SEND.validate_readback(source, source)
+        with self.assertRaisesRegex(RuntimeError, "lost question links"):
+            SEND.validate_readback(source, source.replace("question/456", "answer/456"))
 
 
 if __name__ == "__main__":

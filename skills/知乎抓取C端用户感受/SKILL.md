@@ -7,7 +7,7 @@ description: 每日抓取知乎 C 端用户感受，整理为问题与高赞回�
 
 ## 用途
 
-每天从知乎抓取 C 端用户对家纺相关产品的真实感受，固定关键词为“枕芯”“被芯”“四件套”，并在完整报告生成后通过私密 Webhook 把报告按 Markdown 分段推送到钉钉群。
+每天从知乎抓取 C 端用户对家纺相关产品的真实感受，固定关键词为“枕芯”“被芯”“四件套”。完整报告生成后创建钉钉在线文档，群里只发送“点击查看完整市场情报”的入口。
 
 ## 运行方式
 
@@ -17,7 +17,7 @@ description: 每日抓取知乎 C 端用户感受，整理为问题与高赞回�
 - CLI：优先使用 zhihu-cli 0.2.4 的已认证客户端；每次搜索请求最多 10 条，小批分页并按问题 ID 聚合搜索结果中的可见回答。
 - 安全边界：只允许搜索和读取；禁止发布、点赞、关注或删除。Cookie 只保存在 007 的 `~/.zhihu-cli/cookies.json`，权限为 `600`，不得进入 GitHub、Notion、日志或报告。
 - 输出：`/home/jolin/reports/zhihu-customer-voice/MMDD家纺c端客户抓取.md`；当天已有完整报告时不重复抓取。
-- 推送：报告通过大小和结构校验后，由 007 上的 `dws chat message send-by-webhook` 按 Markdown 段落分段发送；每段成功后写入进度标记，相同日期和文件摘要不重复发送。
+- 推送：报告通过大小和结构校验后，由 007 创建钉钉在线文档并回读校验，按目标群当日成员授予只读权限；群 Webhook 只发送“点击查看完整市场情报”的文档入口。文档、访问权限和群通知分别写入进度标记，相同日期和文件摘要不重复执行。
 - 下游边界：不推送 Discord；旧 Discord sender 与环境文件不在本工作流的 systemd 执行链中。
 - 失败行为：认证失效、验证码、网络错误或无有效内容时退出失败，不生成空报告。
 
@@ -51,8 +51,8 @@ description: 每日抓取知乎 C 端用户感受，整理为问题与高赞回�
 ## 007 部署文件
 
 - `server/run.py`：带单实例锁、小批分页、请求限速、问题 ID 去重与回答聚合、写入前完整性校验、原子写入及当天幂等。
-- `server/send_dingtalk.py`：校验报告后通过 dws Webhook 发送 Markdown 分段，支持分段进度恢复与整体幂等。
-- `server/zhihu-dingtalk.env.example`：钉钉 profile、Webhook token 名称和分段参数模板；真实 token 只保存在 007 的 `600` 权限配置中。
+- `server/send_dingtalk.py`：创建并回读钉钉在线文档，向目标群成员授予只读权限后只向群发送一个入口，支持阶段恢复与整体幂等。
+- `server/zhihu-dingtalk.env.example`：钉钉 profile、目标群与 Webhook token 名称模板；真实 token 只保存在 007 的 `600` 权限配置中。
 - `server/zhihu-customer-voice.service`：只读 systemd oneshot，限制权限和可写目录。
 - `server/zhihu-customer-voice.timer`：每天 23:06 America/New_York 运行，支持关机后补跑。
 
