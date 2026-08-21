@@ -1,0 +1,204 @@
+{
+  "id": "zhihuDingtalkMarketIntel",
+  "name": "Zhihu Market Intelligence to DingTalk",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zhihu-market-intelligence",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7f638264-0ddd-48bb-915c-d1c809082f94",
+      "name": "Receive Delivery",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-720, 0],
+      "webhookId": "a21e9d14-ff8d-4af6-84be-aa4762368b96"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst path = require('path');\nconst event = $input.first().json;\nconst body = event.body ?? event;\nconst required = ['title', 'document_url', 'report_date', 'idempotency_key'];\nfor (const field of required) {\n  if (typeof body[field] !== 'string' || !body[field].trim()) {\n    throw new Error(`Missing or invalid field: ${field}`);\n  }\n}\nconst title = body.title.trim();\nconst documentUrl = body.document_url.trim();\nconst reportDate = body.report_date.trim();\nconst idempotencyKey = body.idempotency_key.trim();\nif (title.length > 120 || idempotencyKey.length > 180) {\n  throw new Error('Title or idempotency key is too long');\n}\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(reportDate)) {\n  throw new Error('report_date must use YYYY-MM-DD');\n}\nif (!/^https:\\/\\/alidocs\\.dingtalk\\.com\\//.test(documentUrl)) {\n  throw new Error('document_url must be an alidocs.dingtalk.com HTTPS URL');\n}\nif (!/^[A-Za-z0-9:._-]+$/.test(idempotencyKey)) {\n  throw new Error('idempotency_key contains unsupported characters');\n}\nconst storeDir = '/home/node/.n8n/delivery-state';\nfs.mkdirSync(storeDir, { recursive: true });\nconst recordPath = path.join(storeDir, `${idempotencyKey}.json`);\nlet existing = null;\ntry {\n  existing = JSON.parse(fs.readFileSync(recordPath, 'utf8'));\n} catch (error) {\n  if (error.code !== 'ENOENT') throw error;\n}\nlet claimed = false;\nif (!existing) {\n  const pending = { status: 'pending', idempotency_key: idempotencyKey, report_date: reportDate, claimed_at: new Date().toISOString() };\n  try {\n    fs.writeFileSync(recordPath, JSON.stringify(pending) + '\\n', { flag: 'wx', mode: 0o600 });\n    existing = pending;\n    claimed = true;\n  } catch (error) {\n    if (error.code !== 'EEXIST') throw error;\n    existing = JSON.parse(fs.readFileSync(recordPath, 'utf8'));\n  }\n}\nreturn [{\n  json: {\n    title,\n    document_url: documentUrl,\n    report_date: reportDate,\n    idempotency_key: idempotencyKey,\n    record_path: recordPath,\n    duplicate: !claimed && existing.status === 'sent',\n    pending: !claimed && existing.status !== 'sent',\n    existing,\n    dingtalk_payload: {\n      msgtype: 'markdown',\n      markdown: {\n        title,\n        text: `### ${title}\\n\\n[点击查看完整市场情报](${documentUrl})`,\n      },\n    },\n  },\n}];"
+      },
+      "id": "b610eada-534b-4fd6-8366-b91568613062",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bd850e45-1e6a-465e-8f07-4c6615f00118",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bed34a26-fc90-4d51-a03e-12c282da757e",
+      "name": "Already Delivered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-280, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, duplicate: true, idempotency_key: $json.idempotency_key, sent_at: $json.existing?.sent_at ?? null } }}",
+        "options": {}
+      },
+      "id": "0c657f24-7507-4805-8d3e-004b196af578",
+      "name": "Respond Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [-40, -120]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1bc5e504-29fc-4cc7-9728-155615101be1",
+              "leftValue": "={{ $json.pending }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "15fb40fc-f12a-4095-87b5-05c81a045dac",
+      "name": "Delivery Pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-40, 120]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, pending: true, idempotency_key: $json.idempotency_key, message: 'A prior delivery is pending verification' } }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "1c9e1a3c-166f-4019-a04f-f8410fb6914c",
+      "name": "Respond Pending",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [180, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://oapi.dingtalk.com/robot/send?access_token=' + $env.DINGTALK_WEBHOOK_TOKEN }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.dingtalk_payload) }}",
+        "options": {}
+      },
+      "id": "0f196323-a486-4e74-bb62-6009540386d0",
+      "name": "Send DingTalk Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [180, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst response = $input.first().json;\nif (Number(response.errcode) !== 0) {\n  throw new Error(`DingTalk failed: ${response.errmsg ?? 'unknown error'}`);\n}\nconst validated = $('Validate Request').first().json;\nconst sent = {\n  status: 'sent',\n  idempotency_key: validated.idempotency_key,\n  report_date: validated.report_date,\n  document_url: validated.document_url,\n  sent_at: new Date().toISOString(),\n};\nfs.writeFileSync(validated.record_path, JSON.stringify(sent) + '\\n', { mode: 0o600 });\nreturn [{\n  json: {\n    ok: true,\n    duplicate: false,\n    idempotency_key: validated.idempotency_key,\n    errcode: Number(response.errcode),\n    errmsg: response.errmsg ?? 'ok',\n    sent_at: sent.sent_at,\n  },\n}];"
+      },
+      "id": "1653fd83-afbc-42f3-a8c5-c055fe938ccf",
+      "name": "Verify and Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "1c18020e-b61d-4434-ab76-bd2387fdc07c",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [620, 240]
+    }
+  ],
+  "connections": {
+    "Receive Delivery": {
+      "main": [[{"node": "Validate Request", "type": "main", "index": 0}]]
+    },
+    "Validate Request": {
+      "main": [[{"node": "Already Delivered?", "type": "main", "index": 0}]]
+    },
+    "Already Delivered?": {
+      "main": [
+        [{"node": "Respond Duplicate", "type": "main", "index": 0}],
+        [{"node": "Delivery Pending?", "type": "main", "index": 0}]
+      ]
+    },
+    "Delivery Pending?": {
+      "main": [
+        [{"node": "Respond Pending", "type": "main", "index": 0}],
+        [{"node": "Send DingTalk Message", "type": "main", "index": 0}]
+      ]
+    },
+    "Send DingTalk Message": {
+      "main": [[{"node": "Verify and Record", "type": "main", "index": 0}]]
+    },
+    "Verify and Record": {
+      "main": [[{"node": "Respond Success", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "active": false,
+  "versionId": "5f367f51-f443-491a-b95b-d8bc1248c9d1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

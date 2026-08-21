@@ -9,13 +9,16 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
 ZONE = ZoneInfo("America/New_York")
 REPORTS = Path.home() / "reports/zhihu-customer-voice"
-STATE = Path.home() / ".local/state/zhihu-customer-voice/dingtalk-document"
+STATE = Path.home() / ".local/state/zhihu-customer-voice/dingtalk-document-n8n"
 DWS = Path.home() / ".npm-global/bin/dws"
 ENTRY_LABEL = "点击查看完整市场情报"
 REQUIRED_MARKERS = (
@@ -340,6 +343,42 @@ def grant_group_read_access(node, profile, group_id):
     return len(target_users) + 1
 
 
+def validate_n8n_webhook_url(value):
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
+        raise RuntimeError("N8N_DINGTALK_WEBHOOK_URL must use local HTTP loopback")
+    if parsed.port not in {None, 5678} or not parsed.path.startswith("/webhook/"):
+        raise RuntimeError("N8N_DINGTALK_WEBHOOK_URL has an invalid port or path")
+    return value
+
+
+def deliver_through_n8n(url, payload, timeout=45):
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"n8n delivery failed with HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"n8n delivery request failed: {exc.reason}") from exc
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("n8n delivery returned non-JSON output") from exc
+    if result.get("ok") is not True:
+        message = result.get("errmsg") or result.get("message") or "unknown n8n error"
+        raise RuntimeError(f"n8n/DingTalk delivery was not successful: {message}")
+    if result.get("idempotency_key") != payload["idempotency_key"]:
+        raise RuntimeError("n8n delivery response idempotency key mismatch")
+    return result
+
+
 def main():
     args = parse_args()
     report_date = (
@@ -360,8 +399,8 @@ def main():
         return 0
 
     profile = required_env("DINGTALK_PROFILE")
-    token = required_env("DINGTALK_WEBHOOK_TOKEN")
     group_id = required_env("DINGTALK_GROUP_ID")
+    n8n_url = validate_n8n_webhook_url(required_env("N8N_DINGTALK_WEBHOOK_URL"))
     if not DWS.is_file():
         raise RuntimeError(f"dws executable not found: {DWS}")
 
@@ -377,7 +416,7 @@ def main():
                     "document_access": "CURRENT_GROUP_MEMBERS_READER",
                     "group_message": ENTRY_LABEL,
                     "profile_configured": bool(profile),
-                    "webhook_configured": bool(token),
+                    "n8n_webhook_configured": bool(n8n_url),
                     "resume_supported": True,
                 },
                 ensure_ascii=False,
@@ -444,26 +483,27 @@ def main():
     link = document_url(document_state, node)
 
     if not notification_marker.exists():
-        run_dws(
-            [
-                "chat",
-                "message",
-                "send-by-webhook",
-                "--token",
-                token,
-                "--title",
-                ENTRY_LABEL,
-                "--text",
-                f"[{ENTRY_LABEL}]({link})",
-            ],
-            profile,
+        idempotency_key = f"zhihu-market-intelligence:{report_date.isoformat()}:{digest[:16]}"
+        message_title = f"家纺报告｜C端市场情报 {report_date:%Y-%m-%d}"
+        delivery = deliver_through_n8n(
+            n8n_url,
+            {
+                "title": message_title,
+                "document_url": link,
+                "report_date": report_date.isoformat(),
+                "idempotency_key": idempotency_key,
+            },
         )
         atomic_json(
             notification_marker,
             {
                 "nodeId": node,
                 "url": link,
+                "title": message_title,
                 "message": ENTRY_LABEL,
+                "route": "n8n_to_dingtalk_webhook",
+                "idempotencyKey": idempotency_key,
+                "n8nDuplicate": bool(delivery.get("duplicate")),
                 "sentAt": dt.datetime.now(ZONE).isoformat(),
             },
         )
@@ -480,7 +520,7 @@ def main():
             "completedAt": dt.datetime.now(ZONE).isoformat(),
         },
     )
-    print(f"published DingTalk document and sent one link: {path.name}")
+    print(f"published DingTalk document and delivered one link through n8n: {path.name}")
     return 0
 
 

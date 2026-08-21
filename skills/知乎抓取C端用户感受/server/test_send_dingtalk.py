@@ -5,6 +5,7 @@ import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.error import URLError
 
 
 MODULE_PATH = Path(__file__).with_name("send_dingtalk.py")
@@ -82,6 +83,40 @@ class DingTalkSenderTests(unittest.TestCase):
             ]
         }
         self.assertEqual(SEND.permission_user_ids(result), {"reader", "editor"})
+
+    def test_n8n_webhook_must_be_local(self):
+        valid = "http://127.0.0.1:5678/webhook/zhihu-market-intelligence"
+        self.assertEqual(SEND.validate_n8n_webhook_url(valid), valid)
+        with self.assertRaisesRegex(RuntimeError, "local HTTP loopback"):
+            SEND.validate_n8n_webhook_url("https://example.com/webhook/test")
+
+    def test_n8n_delivery_requires_matching_success(self):
+        payload = {
+            "title": "日报",
+            "document_url": "https://alidocs.dingtalk.com/i/nodes/abc",
+            "report_date": "2026-08-21",
+            "idempotency_key": "key-1",
+        }
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"ok": True, "duplicate": False, "idempotency_key": "key-1"}
+                ).encode()
+
+        with mock.patch("urllib.request.urlopen", return_value=Response()):
+            result = SEND.deliver_through_n8n("http://127.0.0.1:5678/webhook/x", payload)
+        self.assertTrue(result["ok"])
+
+        with mock.patch("urllib.request.urlopen", side_effect=URLError("offline")):
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                SEND.deliver_through_n8n("http://127.0.0.1:5678/webhook/x", payload)
 
     def test_readback_requires_all_question_links(self):
         source = (
