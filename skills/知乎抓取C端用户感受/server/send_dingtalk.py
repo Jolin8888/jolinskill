@@ -228,6 +228,24 @@ def exact_document(search_result, name):
     return matches[0] if matches else ("", {})
 
 
+def dingtalk_document_name(report_date):
+    return f"知乎｜国内家纺C端客户需求汇总｜{report_date.isoformat()}"
+
+
+def recover_verified_document(search_result, name, source, profile):
+    node, found = exact_document(search_result, name)
+    if not node:
+        return "", {}, False
+    returned = document_content(run_dws(["doc", "read", "--node", node], profile))
+    try:
+        validate_readback(source, returned)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"DingTalk document name collision; refusing to reuse {name}"
+        ) from exc
+    return node, found, True
+
+
 def document_url(value, node):
     for key, child in walk_values(value):
         if key.lower() in {
@@ -319,8 +337,10 @@ def grant_group_read_access(node, profile, group_id):
         )
     )
     missing = sorted(target_users - existing)
-    for start in range(0, len(missing), 30):
-        batch = missing[start : start + 30]
+    # DingTalk's document permission endpoint may reject a comma-separated
+    # batch with a business-level error even when every user is valid. Grant
+    # one principal per request and verify the complete set afterwards.
+    for user_id in missing:
         run_dws(
             [
                 "drive",
@@ -329,7 +349,7 @@ def grant_group_read_access(node, profile, group_id):
                 "--node",
                 node,
                 "--users",
-                ",".join(batch),
+                user_id,
                 "--role",
                 "READER",
             ],
@@ -407,7 +427,7 @@ def main():
     if not DWS.is_file():
         raise RuntimeError(f"dws executable not found: {DWS}")
 
-    document_name = f"家纺C端市场情报 {report_date:%Y-%m-%d}"
+    document_name = dingtalk_document_name(report_date)
     if args.dry_run:
         print(
             json.dumps(
@@ -431,15 +451,20 @@ def main():
         document_state = read_json(document_marker)
         if document_state.get("sha256") != digest:
             raise RuntimeError("document state digest does not match report")
+        if document_state.get("documentName") != document_name:
+            raise RuntimeError("document state name does not match source-specific name")
         node = str(document_state.get("nodeId") or "")
         if not node:
             raise RuntimeError("document state has no nodeId")
+        readback_verified = False
     else:
         searched = run_dws(
             ["drive", "search", "--query", document_name, "--limit", "20"],
             profile,
         )
-        node, created = exact_document(searched, document_name)
+        node, created, readback_verified = recover_verified_document(
+            searched, document_name, report_text, profile
+        )
         recovered = bool(node)
         if not node:
             created = run_dws(
@@ -458,16 +483,18 @@ def main():
             "file": str(path),
             "sha256": digest,
             "nodeId": node,
+            "documentName": document_name,
             "url": document_url(created, node),
             "recovered": recovered,
             "createdAt": dt.datetime.now(ZONE).isoformat(),
         }
         atomic_json(document_marker, document_state)
 
-    returned = document_content(
-        run_dws(["doc", "read", "--node", node], profile)
-    )
-    validate_readback(report_text, returned)
+    if not readback_verified:
+        returned = document_content(
+            run_dws(["doc", "read", "--node", node], profile)
+        )
+        validate_readback(report_text, returned)
 
     if access_marker.exists():
         access_state = read_json(access_marker)
