@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 ZONE = ZoneInfo("America/New_York")
 REPORTS = Path.home() / "reports/zhihu-customer-voice"
 STATE = Path.home() / ".local/state/zhihu-customer-voice/dingtalk-document-n8n"
+HOLD_STATE = Path.home() / ".local/state/zhihu-customer-voice/publish-holds"
 DWS = Path.home() / ".npm-global/bin/dws"
 ENTRY_LABEL = "点击查看完整市场情报"
 REQUIRED_MARKERS = (
@@ -27,6 +28,20 @@ REQUIRED_MARKERS = (
     "## 二、三类产品需求观察",
     "## 三、消费者共同关注点",
     "## 四、建议优先动作",
+    "## 消费者购买心理行为梳理",
+    "年春夏新品产品上市建议",
+    "## 梦莱儿推广渠道与内容导航",
+    "### 用途一：品牌定位优化",
+    "### 用途二：分品类日常内容卖点",
+    "#### 枕芯",
+    "#### 被芯",
+    "#### 四件套",
+    "小红书",
+    "微信贴图",
+    "公众号",
+    "### 品牌人格一致性自检",
+    "## 分析口径与证据边界",
+    "<!-- CLAUDE_ANALYSIS_END -->",
     "## 五、原始问题与回答明细",
     "### 枕芯原始明细",
     "### 被芯原始明细",
@@ -39,6 +54,13 @@ READBACK_MARKERS = (
     "三类产品需求观察",
     "消费者共同关注点",
     "建议优先动作",
+    "消费者购买心理行为梳理",
+    "年春夏新品产品上市建议",
+    "梦莱儿推广渠道与内容导航",
+    "用途一：品牌定位优化",
+    "用途二：分品类日常内容卖点",
+    "品牌人格一致性自检",
+    "分析口径与证据边界",
     "原始问题与回答明细",
     "采集概况与数据说明",
 )
@@ -410,6 +432,10 @@ def main():
         else dt.datetime.now(ZONE).date()
     )
     path, report_text = report_for(report_date)
+    hold_marker = HOLD_STATE / f"{report_date.isoformat()}.hold"
+    if hold_marker.exists() and not args.dry_run:
+        print(f"DingTalk publication is held for review: {report_date.isoformat()}")
+        return 0
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     STATE.mkdir(parents=True, exist_ok=True)
     marker_base = f"{report_date.isoformat()}-{digest[:16]}"
@@ -441,6 +467,7 @@ def main():
                     "profile_configured": bool(profile),
                     "n8n_webhook_configured": bool(n8n_url),
                     "resume_supported": True,
+                    "held_for_review": hold_marker.exists(),
                 },
                 ensure_ascii=False,
             )

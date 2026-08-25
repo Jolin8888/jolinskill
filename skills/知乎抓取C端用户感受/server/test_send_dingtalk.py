@@ -50,6 +50,28 @@ class DingTalkSenderTests(unittest.TestCase):
                 "知乎｜国内家纺C端客户需求汇总｜2026-08-21",
                 payload["document_name"],
             )
+            self.assertFalse(payload["held_for_review"])
+
+    def test_review_hold_stops_before_dingtalk_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = root / "0825家纺c端客户抓取.md"
+            report.write_text("完整报告", encoding="utf-8")
+            holds = root / "holds"
+            holds.mkdir()
+            (holds / "2026-08-25.hold").write_text("等待审阅\n", encoding="utf-8")
+            with (
+                mock.patch.object(
+                    SEND,
+                    "parse_args",
+                    return_value=mock.Mock(date="2026-08-25", dry_run=False),
+                ),
+                mock.patch.object(SEND, "report_for", return_value=(report, "完整报告")),
+                mock.patch.object(SEND, "HOLD_STATE", holds),
+                mock.patch.object(SEND, "required_env") as required,
+            ):
+                self.assertEqual(0, SEND.main())
+            required.assert_not_called()
 
     def test_run_dws_accepts_composite_json_without_top_level_success(self):
         completed = subprocess.CompletedProcess(
@@ -211,6 +233,13 @@ class DingTalkSenderTests(unittest.TestCase):
         source = (
             "## 一、今日核心判断\n## 二、三类产品需求观察\n"
             "## 三、消费者共同关注点\n## 四、建议优先动作\n"
+            "## 消费者购买心理行为梳理\n"
+            "## 2027年春夏新品产品上市建议\n"
+            "## 梦莱儿推广渠道与内容导航\n"
+            "### 用途一：品牌定位优化\n"
+            "### 用途二：分品类日常内容卖点\n"
+            "### 品牌人格一致性自检\n"
+            "## 分析口径与证据边界\n"
             "## 五、原始问题与回答明细\n## 六、采集概况与数据说明\n"
             "https://www.zhihu.com/question/123\n"
             "https://www.zhihu.com/question/456"
