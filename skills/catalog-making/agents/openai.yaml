@@ -1,0 +1,4 @@
+interface:
+  display_name: "catalog制作"
+  short_description: "制作与更新高端 B 端产品图册，保留完整产品图，统一材质、包装与品牌版式"
+  default_prompt: "使用 $catalog-making 按已确认的品牌风格制作或更新产品图册，保持图片完整等比并交付经过检查的完整 PDF。"

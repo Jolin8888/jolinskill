@@ -1,0 +1,9 @@
+{
+  "profile": "FY editorial catalog baseline — adaptable, not a universal requirement",
+  "page": {"width_pt": 900, "height_pt": 600},
+  "colors": {"ink": "#302B26", "muted": "#77716A", "ivory": "#FCF8EF", "fy_brown": "#5A3A2A", "product_page": "#FFFFFF", "festive_burgundy": "#702532", "festive_green": "#254B3C"},
+  "grid": {"image_box_pt": [250, 250], "three_column_x": [40, 325, 610], "two_column_x": [180, 470], "single_column_x": [325], "image_top_pt": 157, "margin_pt": 40},
+  "typography": {"heading_style": "fine serif", "accent_style": "natural italic", "body_style": "legible sans serif", "historical_font_names": ["Didot", "Baskerville", "Arial"], "font_files_included": false, "product_heading_pt": 29, "product_name_pt": 11, "body_pt": 9, "navigation_pt": 7.5},
+  "fy_brand": {"mark_brown": "fy-logo.svg", "mark_ivory": "fy-logo-ivory.svg", "page_lockup": "original mark + BEDDING, or original mark alone", "packaging_wordmark": "fybedding", "scope": "FY projects only; other brands supply their own assets"},
+  "project_parameters_to_confirm": ["language", "series", "page_format", "scene_count", "materials", "MOQ", "contact_details", "product_inventory", "packaging_feasibility"]
+}
